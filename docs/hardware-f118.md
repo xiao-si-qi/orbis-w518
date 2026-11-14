@@ -89,3 +89,107 @@ coredump 0xFF0000    64 KB
 ```
 esptool --port COM9 write-flash 0 backup_f118_vendor_16MB.bin
 ```
+
+---
+
+## 7. 厂家资料（重要来源，勿丢）
+
+**厂家 BSP 仓库**：`https://github.com/guitionofficial/Guition`
+板级目录：`components/board/guition_boards/jc3636f118/`
+
+本地参考克隆：`C:\Users\xiaosiqi\Documents\esp32\vendor-guition`（只读参考，56 MB）
+
+从厂家仓库用到的东西：
+
+| 文件 | 用途 |
+|---|---|
+| `board_pins.h` | 引脚定义（屏幕/触摸/编码器/电池/背光）|
+| `lcd_init_commands.h` | ST77916 初始化命令表（本工程 `main/lcd_init_commands.h` 即来源于此）|
+| `board_peripherals.yaml` | 外设参数：I2S 音频、PDM 麦克风、SPI 屏、LEDC 背光 |
+| `board_devices.yaml` | 设备参数：`lcd_cmd_bits: 32`、`data_endian: BIG`、ST77916 驱动版本 |
+| `sdkconfig.defaults.board` | 板级 sdkconfig 默认值 |
+
+> 结论：**音频、编码器、电池引脚与厂家 BSP 完全一致**（见第 8 节），
+> 说明按原理图推导 + 实测的结论是对的，可以作为可信基线。
+
+## 8. 音频（PCM5100A 耳机孔 + PDM 麦克风）
+
+原理图（`6-Schematic diagram/JC3636F118_DAC&LCD.pdf`、`JC3636F118_GPIO.pdf`）与厂家
+`board_peripherals.yaml` 互相印证：
+
+| 功能 | 网络名 | GPIO | 外设 |
+|---|---|---|---|
+| 耳机孔 DAC 位时钟 | `I2S_DAC_BCK` | **53** | I2S 标准模式 TX（master）|
+| 耳机孔 DAC 数据 | `I2S_DAC_DIN` | **52** | 同上 |
+| 耳机孔 DAC 声道 | `I2S_DAC_LRCK/WS` | **51** | 同上 |
+| 麦克风时钟 | `PDM_MIC_SCK` | **39** | I2S PDM RX（**必须在 I2S0**，只有 port 0 有 PDM2PCM）|
+| 麦克风数据 | `PDM_MIC_DATA` | **37** | 同上 |
+
+要点：
+
+- PCM5100A 是**纯 DAC**，没有 I2C 控制、没有 mute 脚 → `voice_audio_mute()` 是空实现。
+- 输出是**线路电平**（3.5 mm），没有板载喇叭。
+- 厂家 `dn_sample_mode` 用 `I2S_PDM_DSR_8S`，本工程用 `DSR_16S`；两者都能工作，
+  自检实测峰值 1386 / RMS 18076（有环境声即正常，峰值 < 200 说明麦克风没接好）。
+
+## 9. 小智 AI 语音（接官方服务端）
+
+链路：`PDM 麦克风 → Opus 编码 → WebSocket 上行 → 服务端 → Opus 解码 → PCM5100A`
+
+| 项 | 值 |
+|---|---|
+| OTA 发现 | `POST https://api.tenclass.net/xiaozhi/ota/` → 返回 `wss://api.tenclass.net/xiaozhi/v1/` |
+| 握手头 | `Authorization`（若服务端给 token）、`Protocol-Version: 2`、`Device-Id`、`Client-Id` |
+| 二进制帧（v2，**大端**）| `version(2) type(2) reserved(4) timestamp(4) size(4) payload`，`type` 0=Opus / 1=JSON |
+| 上行 | **16 kHz** 单声道 **60 ms**（960 采样）|
+| 下行 | **24 kHz** 单声道 60 ms（1440 采样）|
+| 控制消息 | `listen.start/stop/detect`、`tts.start/stop`、`abort` |
+| 半双工 | 播放 TTS 时不录音（本板无 AEC 参考通道）|
+
+**必须声明 `Protocol-Version: 2`**：服务端会据此回 `version:2`；用 v1 时帧头不匹配。
+如果日志出现「服务端二进制帧没有 v2 头」，把 `xiaozhi_client.c` 的 `XZ_PROTO_VER` 改回 1。
+
+开关与地址由 **switchyard 布局 JSON** 的 `voice.enabled` / `voice.endpoint` 下发生效
+（设备端 `layout_parse()` → `xiaozhi_client_configure()`），不需要单独命令。
+
+## 10. 内存预算（ESP32-S31，内部 RAM 约 512 KB）
+
+这台设备同时跑「LVGL + WiFi + MQTT + TLS(HA) + Opus 语音 + HTTP 配置页」，内部 RAM 很紧。
+踩过的坑与最终配置：
+
+| 项目 | 值 | 为什么 |
+|---|---|---|
+| `CONFIG_LV_MEM_SIZE` | **49152** | 128 KB 时内部 RAM 不足，SPI 分不到 DMA 缓冲，屏幕冻结 |
+| `CONFIG_ESP_MAIN_TASK_STACK_SIZE` | **12288** | LVGL 主循环 + 网络 + cfg 处理，默认 3.5 KB 会栈溢出 |
+| HTTP 服务任务栈 | **6144** | 旧工程实测：4 KB 在 `/save` 上栈溢出 |
+| HTTP `max_open_sockets` | **2** | 每个 socket 占 lwIP 缓冲；4 个时 TLS 握手失败 |
+| Opus 发送任务栈 | **24576（PSRAM）** | CELT 编码器极吃栈，8 KB 直接栈溢出崩溃 |
+| Opus 播放任务栈 | **16384（PSRAM）** | 同上，解码 |
+| 音频缓冲 | PSRAM | 内部 RAM 只留必要的 DMA 缓冲 |
+
+**症状对照**：日志出现 `HTTP_CLIENT: Connection failed, sock < 0` 或
+`ESP_ERR_HTTP_CONNECT (internal heap 30 KB)` = 内部 RAM 被挤爆，TLS 握手无法分配，
+表现为 HA 拉取失败 + 小智发现失败 + 屏幕卡住。
+
+## 11. 网页配置页（无需重刷改配置）
+
+WiFi 连上后启动 HTTP 服务，浏览器打开设备 IP（IP 显示在屏上系统页）：
+
+| 地址 | 功能 |
+|---|---|
+| `http://<ip>/` | 配网页：Wi-Fi SSID/密码、HA 地址/Token、MQTT、设备 id、网页账号 |
+| `http://<ip>/save` | POST 保存到 NVS 并重启 |
+| `http://<ip>/ota` | 网页上传固件升级 |
+| `http://<ip>/ota/upload` | POST 原始 `.bin` → 写入另一分区 → 重启 |
+
+- 默认账号 **admin / admin**（`secrets.h` 的 `APP_SECRET_WEB_USER/PASS`），首次开机日志会提示改掉。
+- 配置存 **NVS**，`secrets.h` 只在 NVS 为空时作为首次开机默认值。
+- ⚠️ **没有配网热点兜底**：本工程是 STA-only，若网页里填错 WiFi，只能重新烧写恢复。
+
+## 12. 电池
+
+原理图与厂家 BSP 都确认 **`BATT_ADC → GPIO55`**，分压 15k/10k。
+
+实测该脚读数 **饱和（约 3.34 V，换算成 8.3 V）** —— 这是**引脚悬空**的表现，
+也就是**电池没插**（1.25 mm 座子空着）。插上电池后应落到 3.0–4.3 V，
+固件已做合理性判断，超出范围不显示，避免误导。
