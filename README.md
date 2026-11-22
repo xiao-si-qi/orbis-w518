@@ -1,4 +1,4 @@
-# Orbis W518 · JC3636W518 圆屏 Home Assistant 控制屏
+﻿# Orbis W518 · JC3636W518 圆屏 Home Assistant 控制屏
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5.4-red.svg)](https://docs.espressif.com/projects/esp-idf/)
@@ -92,7 +92,7 @@
 ## 目录结构
 
 ```
-orbis-panel/
+orbis-w518/
 ├── CMakeLists.txt
 ├── partitions.csv              # 16MB: app 4MB + assets(FAT) 11MB
 ├── sdkconfig.defaults          # 16MB QIO / Octal PSRAM 80M / LVGL 9 配置
@@ -128,7 +128,7 @@ orbis-panel/
 
 ```powershell
 . C:\Espressif\tools\Microsoft.v5.5.4.PowerShell_profile.ps1
-cd C:\path\to\orbis-panel
+cd C:\path\to\orbis-w518
 
 idf.py set-target esp32s3      # 只需一次
 idf.py build
