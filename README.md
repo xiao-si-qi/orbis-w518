@@ -1,4 +1,4 @@
-# Orbis Panel · JC3636W518 圆屏 Home Assistant 控制屏
+# Orbis W518 · JC3636W518 圆屏 Home Assistant 控制屏
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.5.4-red.svg)](https://docs.espressif.com/projects/esp-idf/)
@@ -8,6 +8,25 @@
 > 硬件：GUITION **太极小派 JC3636W518**（2024-07 批次）。本项目不是厂家官方项目。
 
 基于 **ESP32-S3R8 + 1.85" 圆形 360×360 ST77916** 模组的 Home Assistant 触屏控制面板。
+
+## 同系列的另一块屏
+
+本仓库是 **W518 硬件适配**。同一套软件架构（JSON 布局、switchyard 协议、HA 通道）另有一块硬件适配：
+
+| | **本仓库** `orbis-w518` | [`orbis-f118`](https://github.com/xiao-si-qi/orbis-f118) |
+|---|---|---|
+| 硬件 | GUITION 太极小派 **JC3636W518**（2024-07 批次）| GUITION **JC3636F118C**（铝合金外壳，带电池）|
+| MCU | ESP32-S3R8：Xtensa 双核 240 MHz | **ESP32-S31**：RISC-V 双核 320 MHz |
+| 屏幕 | 1.85" 360×360 ST77916（4-line QSPI 40 MHz）| 1.65" 360×360 ST77916（QSPI 80 MHz）|
+| 旋钮 | ❌ 无 | ✅ 有（GPIO 6/7）|
+| 触觉 | 无 | DRV2605L |
+| 电池 | ❌ 无 | ✅ 有（ADC 未标定）|
+| ESP-IDF | v5.5.4 | v6.1（`--preview`，`esp32s31`）|
+| 固件 | 功能全开 | 蓝牙/语音编译排除（内部 RAM 紧张）|
+
+两块屏的**布局协议、MQTT 约定、HA 通道完全一致**，布局可以在
+[switchyard](https://github.com/xiao-si-qi/switchyard) 里互通编辑。
+
 
 > **开发方式：本项目全部由 AI 完成。** 固件、字体生成脚本和文档都是 AI（DeepSeek 助手）
 > 与使用者结对产出：需求拆解、驱动移植、LVGL UI、JSON 布局协议、实体挑选策略、踩坑排查、发布流程。
